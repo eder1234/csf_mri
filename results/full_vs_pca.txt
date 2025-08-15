@@ -1,0 +1,78 @@
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval    --config config.yaml  --split val --best_model outputs/unet2d_full_c80_b32/checkpoin
+ts/best_model.pt 
+
+Split: val — subjects: 15 | mode: full
+dice        : 0.8024
+iou         : 0.6920
+sensitivity : 0.8154
+specificity : 0.9983
+
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval    --config config.yaml  --split test --best_model outputs/unet2d_full_c80_b32/checkpoi
+nts/best_model.pt 
+
+Split: test — subjects: 15 | mode: full
+dice        : 0.8325
+iou         : 0.7201
+sensitivity : 0.8531
+specificity : 0.9983
+
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval        --config config.yaml        --split val        --best_model outputs/unet2d_pca_c
+80_b32/checkpoints/best_model.pt
+
+Split: val — subjects: 15 | mode: pca
+dice        : 0.7651
+iou         : 0.6338
+sensitivity : 0.7981
+specificity : 0.9977
+
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval        --config config.yaml        --split test        --best_model outputs/unet2d_pca_
+c80_b32/checkpoints/best_model.pt
+
+Split: test — subjects: 15 | mode: pca
+dice        : 0.7626
+iou         : 0.6242
+sensitivity : 0.7854
+specificity : 0.9977
+
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval --config config.yaml --split val --best_model outputs/unet2d_dft_power_c80_b32/checkpoints/best_model.pt
+
+Split: val — subjects: 15 | mode: dft_power
+dice        : 0.7573
+iou         : 0.6241
+sensitivity : 0.7983
+specificity : 0.9976
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval --config config.yaml --split test --best_model outputs/unet2d_dft_power_c80_b32/checkpoints/best_model.pt
+
+Split: test — subjects: 15 | mode: dft_power
+dice        : 0.7743
+iou         : 0.6455
+sensitivity : 0.7927
+specificity : 0.9979
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval --config config.yaml --split val --best_model outputs/unet2d_tvt_c80_b32/checkpoints/best_model.pt
+
+Split: val — subjects: 15 | mode: tvt
+dice        : 0.5352
+iou         : 0.3689
+sensitivity : 0.8517
+specificity : 0.9889
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval --config config.yaml --split test --best_model outputs/unet2d_tvt_c80_b32/checkpoints/best_model.pt
+
+Split: test — subjects: 15 | mode: tvt
+dice        : 0.5032
+iou         : 0.3445
+sensitivity : 0.7990
+specificity : 0.9893
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval --config config.yaml --split val --best_model outputs/unet2d_dft_k123_c80_b32/checkpoints/best_model.pt
+
+Split: val — subjects: 15 | mode: dft_k123
+dice        : 0.8047
+iou         : 0.6969
+sensitivity : 0.8233
+specificity : 0.9982
+(csf_mri) rodriguez@rodriguez-Precision-5560:~/Documents/GitHub/csf_mri$ python -m src.training.eval --config config.yaml --split test --best_model outputs/unet2d_dft_k123_c80_b32/checkpoints/best_model.pt
+
+Split: test — subjects: 15 | mode: dft_k123
+dice        : 0.8406
+iou         : 0.7381
+sensitivity : 0.8609
+specificity : 0.9985

@@ -1,0 +1,31 @@
+# ------------------------------------------------------------------
+# Project-wide hyper-parameters and paths
+# ------------------------------------------------------------------
+data:
+  root: data               # parent folder that contains train/ and test/
+  train_dir: train
+  test_dir:  test
+  crop_size: 80            # centre-crop side length
+  val_split: 0.20          # 20 % of subjects from data/train → validation
+  input_mode: dft_k123     # tvt | std | dft_k123 | pca | full | dft_power
+model:
+  type: unet2d
+  in_channels: 64          # 32 phase  + 32 magnitude
+  out_channels: 1
+  base_channels: 32        # width of the first UNet block
+
+train:
+  epochs: 200
+  batch_size: 4            # adjust to GPU memory
+  lr: 1.0e-3
+  optimizer: adam
+  loss: dice               # dice | tversky | focal_dice
+  mixed_precision: true    # use torch.cuda.amp
+  early_stopping: true
+  device: cuda             # "cuda" or "cpu"
+
+augment:
+  flip: true               # random H/V flips
+  rotation: 15             # ± deg, centre-based
+  translate: 0.05          # ± 5 % of crop_size
+  gaussian_noise: 0.01     # σ as fraction of image range
