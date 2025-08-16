@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import os
 import random
 import math
+import csv
 from pathlib import Path
 from typing import List, Tuple, Optional
 
@@ -77,6 +80,8 @@ class CSFVolumeDataset(Dataset):
         seed: int = 42,
         input_mode: str = "full",
         augment_cfg: Optional[dict] = None,
+        return_phase: bool = False,
+        metadata_csv: str | Path | None = None,
     ):
         super().__init__()
 
@@ -101,6 +106,24 @@ class CSFVolumeDataset(Dataset):
         self.crop_size = crop_size
         self.split = split
         self.augment_cfg = augment_cfg or {}
+        self.return_phase = return_phase
+
+        # Load per-subject metadata (v_enc, pixel_size) if provided
+        self.metadata: dict[str, dict[str, float]] = {}
+        if metadata_csv is not None and Path(metadata_csv).exists():
+            with open(metadata_csv, newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    sid = row.get("sample") or row.get("id") or row.get("subject")
+                    if sid is None:
+                        continue
+                    try:
+                        self.metadata[sid] = {
+                            "v_enc": float(row["v_enc"]),
+                            "pixel_size": float(row["pixel_size"]),
+                        }
+                    except KeyError:
+                        continue
 
         # quick sanity on channels
         _ = _feature_mode_to_channels(self.input_mode)
@@ -109,21 +132,25 @@ class CSFVolumeDataset(Dataset):
         return len(self.subjects)
 
     def _augment(
-        self, img: torch.Tensor, mask: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Apply identical spatial transforms to `img` and `mask`."""
+        self, img: torch.Tensor, mask: torch.Tensor, phase: torch.Tensor | None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Apply identical spatial transforms to `img`, `mask` and optionally `phase`."""
         cfg = self.augment_cfg
         if not cfg or self.split != "train":
-            return img, mask
+            return img, mask, phase
 
         # Random flip
         if cfg.get("flip", False):
             if random.random() < 0.5:  # horizontal
                 img = torch.flip(img, dims=[-1])
                 mask = torch.flip(mask, dims=[-1])
+                if phase is not None:
+                    phase = torch.flip(phase, dims=[-1])
             if random.random() < 0.5:  # vertical
                 img = torch.flip(img, dims=[-2])
                 mask = torch.flip(mask, dims=[-2])
+                if phase is not None:
+                    phase = torch.flip(phase, dims=[-2])
 
         # Random affine (rotation + translation, no scaling)
         rot_deg = cfg.get("rotation", 0)
@@ -137,13 +164,15 @@ class CSFVolumeDataset(Dataset):
             )
             img = F.affine(img, angle=angle, translate=translate, scale=1.0, shear=0)
             mask = F.affine(mask, angle=angle, translate=translate, scale=1.0, shear=0)
+            if phase is not None:
+                phase = F.affine(phase, angle=angle, translate=translate, scale=1.0, shear=0)
 
         # Gaussian noise (image only)
         noise_std = cfg.get("gaussian_noise", 0)
         if noise_std > 0:
             img = img + noise_std * torch.randn_like(img)
 
-        return img, mask
+        return img, mask, phase
 
     def _build_input(self, phase: np.ndarray, mag: np.ndarray) -> np.ndarray:
         """
@@ -196,18 +225,29 @@ class CSFVolumeDataset(Dataset):
         # centre-crop to (crop_size, crop_size)
         img = _center_crop(img, self.crop_size)
         mask = _center_crop(mask, self.crop_size)
+        phase_crop = _center_crop(phase, self.crop_size) if self.return_phase else None
 
         # to tensors
         img_t = torch.from_numpy(img).float()           # (C, crop, crop)
         mask_t = torch.from_numpy(mask).unsqueeze(0)    # (1, crop, crop)
+        phase_t = torch.from_numpy(phase_crop).float() if phase_crop is not None else None
 
-        img_t, mask_t = self._augment(img_t, mask_t)
+        img_t, mask_t, phase_t = self._augment(img_t, mask_t, phase_t)
 
         # normalise image (per-sample, zero-mean unit-var)
         img_t = (img_t - img_t.mean()) / (img_t.std() + 1e-8)
 
-        return {
+        sample = {
             "image": img_t,            # FloatTensor
             "mask": mask_t.float(),    # FloatTensor (0 / 1)
             "id": subj_dir.name,
         }
+
+        if self.return_phase and phase_t is not None:
+            sample["phase"] = phase_t
+            meta = self.metadata.get(subj_dir.name, {})
+            if meta:
+                sample["v_enc"] = torch.tensor(meta.get("v_enc", 0.0), dtype=torch.float32)
+                sample["pixel_size"] = torch.tensor(meta.get("pixel_size", 1.0), dtype=torch.float32)
+
+        return sample

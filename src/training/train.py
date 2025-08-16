@@ -11,7 +11,18 @@ from torch.utils.tensorboard import SummaryWriter
 # local imports
 from src import CSFVolumeDataset, UNet2D
 from src.utils.misc import load_yaml, seed_everything, save_ckpt
-from src.utils.losses import DiceLoss
+from src.utils.losses import DiceLoss, FlowDiceLoss
+
+
+def _get_loss_fn(cfg: Dict) -> torch.nn.Module:
+    """Factory to create the loss function from config."""
+    name = cfg["train"].get("loss", "dice").lower()
+    if name == "dice":
+        return DiceLoss()
+    if name == "flow_dice":
+        lam = cfg["train"].get("flow_lambda", 0.1)
+        return FlowDiceLoss(lambda_flow=lam)
+    raise ValueError(f"Unknown loss '{name}'")
 
 def _in_channels_for_mode(mode: str) -> int:
     if mode == "full":
@@ -42,9 +53,17 @@ def run_epoch(
         imgs = batch["image"].to(device, non_blocking=True)
         masks = batch["mask"].to(device, non_blocking=True)
 
+        extra = {}
+        if "phase" in batch:
+            extra["phase"] = batch["phase"].to(device, non_blocking=True)
+        if "v_enc" in batch:
+            extra["v_enc"] = batch["v_enc"].to(device, non_blocking=True)
+        if "pixel_size" in batch:
+            extra["pixel_size"] = batch["pixel_size"].to(device, non_blocking=True)
+
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             logits = model(imgs)
-            loss = criterion(logits, masks)
+            loss = criterion(logits, masks, **extra)
 
         if train:
             optimizer.zero_grad(set_to_none=True)
@@ -80,6 +99,8 @@ def main(cfg: Dict, model_name: str | None = None) -> None:
     input_mode = cfg["data"].get("input_mode", "full")
 
     # datasets & loaders --------------------------------------------------
+    use_flow = cfg["train"].get("loss") == "flow_dice"
+    metadata_csv = cfg["data"].get("metadata_csv")
     train_ds = CSFVolumeDataset(
         root_dir=Path(cfg["data"]["root"]) / cfg["data"]["train_dir"],
         split="train",
@@ -87,13 +108,17 @@ def main(cfg: Dict, model_name: str | None = None) -> None:
         val_split=cfg["data"]["val_split"],
         input_mode=input_mode,
         augment_cfg=cfg["augment"],
+        return_phase=use_flow,
+        metadata_csv=metadata_csv,
     )
     val_ds = CSFVolumeDataset(
         root_dir=Path(cfg["data"]["root"]) / cfg["data"]["train_dir"],
         split="val",
         crop_size=cfg["data"]["crop_size"],
         val_split=cfg["data"]["val_split"],
-        input_mode=input_mode
+        input_mode=input_mode,
+        return_phase=use_flow,
+        metadata_csv=metadata_csv,
     )
     train_loader = DataLoader(
         train_ds,
@@ -118,7 +143,7 @@ def main(cfg: Dict, model_name: str | None = None) -> None:
         out_channels=cfg["model"]["out_channels"],
         base_channels=cfg["model"]["base_channels"],
     ).to(device)
-    criterion = DiceLoss()
+    criterion = _get_loss_fn(cfg)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg["train"]["lr"])
 
     # AMP scaler ----------------------------------------------------------
