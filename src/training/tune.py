@@ -36,27 +36,48 @@ from optuna.trial import Trial
 # local imports ------------------------------------------------------------
 from src import CSFVolumeDataset, UNet2D
 from src.utils.misc import load_yaml, seed_everything, save_ckpt
-from src.utils.losses import DiceLoss
+from src.utils.losses import DiceLoss, FlowDiceLoss
+
+
+def _get_loss_fn(cfg: Dict) -> torch.nn.Module:
+    name = cfg["train"].get("loss", "dice").lower()
+    if name == "dice":
+        return DiceLoss()
+    if name == "flow_dice":
+        lam = cfg["train"].get("flow_lambda", 0.1)
+        return FlowDiceLoss(lambda_flow=lam)
+    raise ValueError(f"Unknown loss '{name}'")
 
 # -------------------------------------------------------------------------
 # Helper: single epoch run (adapted from train.py)
 # -------------------------------------------------------------------------
 
-def run_epoch(model: torch.nn.Module,
-              loader: DataLoader,
-              criterion: torch.nn.Module,
-              optimizer: torch.optim.Optimizer | None,
-              device: torch.device,
-              scaler: GradScaler | None,
-              train: bool = True) -> float:
+def run_epoch(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    criterion: torch.nn.Module,
+    optimizer: torch.optim.Optimizer | None,
+    device: torch.device,
+    scaler: GradScaler | None,
+    train: bool = True,
+) -> float:
     model.train(train)
     running: float = 0.0
-    for imgs, masks in ((b["image"].to(device, non_blocking=True),
-                         b["mask"].to(device, non_blocking=True))
-                        for b in loader):
+    for batch in loader:
+        imgs = batch["image"].to(device, non_blocking=True)
+        masks = batch["mask"].to(device, non_blocking=True)
+
+        extra = {}
+        if "phase" in batch:
+            extra["phase"] = batch["phase"].to(device, non_blocking=True)
+        if "v_enc" in batch:
+            extra["v_enc"] = batch["v_enc"].to(device, non_blocking=True)
+        if "pixel_size" in batch:
+            extra["pixel_size"] = batch["pixel_size"].to(device, non_blocking=True)
+
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             logits = model(imgs)
-            loss = criterion(logits, masks)
+            loss = criterion(logits, masks, **extra)
         if train:
             optimizer.zero_grad(set_to_none=True)
             if scaler is not None:
@@ -82,18 +103,24 @@ def objective(trial: Trial, cfg: Dict, device: torch.device, out_dir: Path) -> f
     scheduler_name = trial.suggest_categorical("scheduler", ["constant", "onecycle"])
 
     # ---------------- dataset -------------------------------------------
+    use_flow = cfg["train"].get("loss") == "flow_dice"
+    metadata_csv = cfg["data"].get("metadata_csv")
     train_ds = CSFVolumeDataset(
         root_dir=Path(cfg["data"]["root"]) / cfg["data"]["train_dir"],
         split="train",
         crop_size=cfg["data"]["crop_size"],
         val_split=cfg["data"]["val_split"],
         augment_cfg=cfg["augment"],
+        return_phase=use_flow,
+        metadata_csv=metadata_csv,
     )
     val_ds = CSFVolumeDataset(
         root_dir=Path(cfg["data"]["root"]) / cfg["data"]["train_dir"],
         split="val",
         crop_size=cfg["data"]["crop_size"],
         val_split=cfg["data"]["val_split"],
+        return_phase=use_flow,
+        metadata_csv=metadata_csv,
     )
     train_loader = DataLoader(train_ds, batch_size=cfg["train"]["batch_size"],
                               sampler=RandomSampler(train_ds), num_workers=4, pin_memory=True)
@@ -101,10 +128,12 @@ def objective(trial: Trial, cfg: Dict, device: torch.device, out_dir: Path) -> f
                             num_workers=2, pin_memory=True)
 
     # ---------------- model & optimiser ----------------------------------
-    model = UNet2D(in_channels=cfg["model"]["in_channels"],
-                   out_channels=cfg["model"]["out_channels"],
-                   base_channels=base_ch).to(device)
-    criterion = DiceLoss()
+    model = UNet2D(
+        in_channels=cfg["model"]["in_channels"],
+        out_channels=cfg["model"]["out_channels"],
+        base_channels=base_ch,
+    ).to(device)
+    criterion = _get_loss_fn(cfg)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     # LR scheduler ---------------------------------------------------------
